@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>MoneyPilot — NZ Finance Scanner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#020810;color:#F0F6FF;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+#root{max-width:520px;margin:0 auto}
+input::placeholder,textarea::placeholder{color:#1E3050}
+select{color:#F0F6FF;font-family:inherit}
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-thumb{background:#14213D;border-radius:2px}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulseRing{0%{transform:scale(1);opacity:.7}100%{transform:scale(1.6);opacity:0}}
+@keyframes shimmer{0%,100%{background-position:0% center}50%{background-position:100% center}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState}=React;
+const T={bg:"#020810",card:"#070E1B",card2:"#0A1220",border:"#14213D",
+  accent:"#4F7FFF",accentB:"#7B5FFF",green:"#00E5A0",amber:"#FFB800",
+  red:"#FF4069",purple:"#9B6DFF",teal:"#00D4FF",pink:"#FF6AB0",
+  t1:"#F0F6FF",t2:"#6B8CAE",t3:"#243554"};
+const nv=v=>parseFloat(v)||0;
+const fmt=v=>"$"+Math.round(v).toLocaleString();
+
+const Field=({label,val,set,ph,pre,half,hint})=>(
+  <div style={{width:half?"calc(50% - 5px)":"100%",marginBottom:12}}>
+    <div style={{fontSize:10,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:T.t2,marginBottom:hint?2:5}}>{label}</div>
+    {hint&&<div style={{fontSize:10,color:T.t3,marginBottom:4}}>{hint}</div>}
+    <div style={{position:"relative"}}>
+      {pre&&<span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:T.t2,pointerEvents:"none",fontSize:15}}>$</span>}
+      <input value={val} onChange={e=>set(e.target.value)} placeholder={ph}
+        style={{width:"100%",background:"#050C18",border:`1.5px solid ${T.border}`,borderRadius:12,
+          padding:`12px 13px 12px ${pre?30:13}px`,color:T.t1,fontSize:14,outline:"none",
+          fontFamily:"inherit",transition:"all .2s"}}
+        onFocus={e=>{e.target.style.borderColor=T.accent;e.target.style.boxShadow=`0 0 0 3px ${T.accent}18`}}
+        onBlur={e=>{e.target.style.borderColor=T.border;e.target.style.boxShadow="none"}}/>
+    </div>
+  </div>
+);
+const Row=({children})=><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{children}</div>;
+const GCard=({children,color="#14213D"})=>(
+  <div style={{background:"linear-gradient(145deg,#070E1B,#0A1220)",border:`1.5px solid ${color}28`,
+    borderRadius:22,padding:20,marginBottom:14,boxShadow:`0 0 40px ${color}08,inset 0 1px 0 ${color}12`}}>
+    {children}
+  </div>
+);
+const SHead=({icon,title,color,badge})=>(
+  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+    <div style={{display:"flex",alignItems:"center",gap:11}}>
+      <div style={{width:42,height:42,borderRadius:13,background:`${color}18`,border:`1.5px solid ${color}28`,
+        display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:`0 0 14px ${color}18`}}>{icon}</div>
+      <span style={{fontWeight:900,fontSize:15,color:T.t1}}>{title}</span>
+    </div>
+    {badge&&<span style={{background:`${color}15`,color,border:`1px solid ${color}25`,borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:800}}>{badge}</span>}
+  </div>
+);
+
+// ── Scam patterns ─────────────────────────────────────────────────────────────
+const SCAMS=[
+  {p:/ird|inland revenue|tax refund/i,label:"IRD Impersonation",risk:"CRITICAL",tip:"IRD never texts/emails asking for payment. Call 0800 775 247 to verify."},
+  {p:/bitcoin|crypto|urgent transfer|gift card/i,label:"Crypto/Gift Card Scam",risk:"CRITICAL",tip:"No legitimate business requests crypto or gift card payments. Hang up immediately."},
+  {p:/account suspended|verify now|click here|act immediately/i,label:"Phishing Attempt",risk:"HIGH",tip:"Banks never ask you to verify via SMS link. Go directly to your bank's website."},
+  {p:/won|prize|lottery|unclaimed|inheritance/i,label:"Prize/Lottery Scam",risk:"HIGH",tip:"You cannot win a competition you didn't enter. Never pay fees to claim prizes."},
+  {p:/overdue|debt collector|sheriff|arrest warrant/i,label:"Fake Debt Collector",risk:"HIGH",tip:"Real debt collectors must provide written notice. Ask for their license number."},
+  {p:/investment|guaranteed return|passive income|double your/i,label:"Investment Scam",risk:"HIGH",tip:"Guaranteed returns don't exist. Check the FMA register before investing."},
+  {p:/nz post|courier|parcel|customs fee/i,label:"Parcel Delivery Scam",risk:"MEDIUM",tip:"NZ Post never asks for payment via SMS to release parcels."},
+  {p:/microsoft|apple|google|virus|your computer/i,label:"Tech Support Scam",risk:"HIGH",tip:"Microsoft/Apple never call you unsolicited. Hang up immediately."},
+];
+const detectScams=txt=>!txt?[]:SCAMS.filter(s=>s.p.test(txt));
+
+// ── Payment audit ──────────────────────────────────────────────────────────────
+function auditPayments(payments){
+  const out=[];
+  payments.forEach(p=>{
+    if(!p.name||!p.amount) return;
+    const amt=nv(p.amount),freq=p.freq||"monthly";
+    const annual=freq==="weekly"?amt*52:freq==="fortnightly"?amt*26:amt*12;
+    const dupes=payments.filter(q=>q!==p&&q.name&&p.name&&q.name.toLowerCase().includes(p.name.toLowerCase().split(" ")[0])&&q.amount===p.amount);
+    if(dupes.length>0) out.push({icon:"⚠️",title:`Possible Duplicate: ${p.name}`,color:T.red,priority:"CRITICAL",
+      body:`You may be paying for "${p.name}" more than once — ${fmt(annual)}/yr per occurrence.`,
+      draft:`Hi,\n\nI believe I have a duplicate payment for ${p.name}. Please cancel one immediately and refund any duplicate charges.\n\nThanks`});
+    if(p.lastUsed&&nv(p.lastUsed)>3) out.push({icon:"💤",title:`Dormant Payment: ${p.name}`,color:T.amber,priority:"HIGH",
+      body:`You haven't used ${p.name} in ${p.lastUsed} months but are still paying ${fmt(annual)}/yr.`,
+      draft:`Hi,\n\nI'd like to cancel my ${p.name} subscription effective immediately. Please confirm and stop all future billing.\n\nThanks`});
+    if(/insur/i.test(p.name)&&p.notes&&/cancel|lapsed|invalid|sold/i.test(p.notes))
+      out.push({icon:"🚨",title:`Invalid Insurance: ${p.name}`,color:T.red,priority:"CRITICAL",
+        body:`Paying ${fmt(annual)}/yr for insurance that may be invalid or on an asset you no longer own.`,
+        draft:`Hi,\n\nI am formally cancelling my insurance policy for ${p.name} with immediate effect. The insured asset is no longer valid. Please stop all automatic payments.\n\nThanks`});
+    if(annual>1200&&!/mortgage|rent|insurance/i.test(p.name))
+      out.push({icon:"💸",title:`High Recurring Cost: ${p.name}`,color:T.purple,priority:"MEDIUM",
+        body:`${p.name} costs ${fmt(annual)}/yr. Worth reviewing — have you used it recently?`,
+        draft:`Hi,\n\nI'd like to review my ${p.name} account. Could you advise what better rates or plans are available?\n\nThanks`});
+  });
+  return out;
+}
+
+// ── Main analysis ──────────────────────────────────────────────────────────────
+function analyse(d){
+  const out=[];
+  if(d.mortgageRate&&d.mortgageBal){
+    const mkt=6.55,diff=d.mortgageRate-mkt;
+    out.push(diff>0
+      ?{icon:"🏠",title:"Mortgage Rate Too High",color:T.red,pri:1,urgency:"Act Now",
+        body:`On ${d.mortgageRate}% with ${d.mortgageBank||"your bank"} — market is ${mkt}%. Overpaying on ${fmt(d.mortgageBal)} every year.`,
+        saving:fmt(Math.abs(diff)/100*d.mortgageBal)+"/yr",to:"hello@squirrel.co.nz",alt:"Squirrel Mortgages",action:"negotiate"}
+      :{icon:"🏠",title:"Mortgage Rate Competitive",color:T.green,pri:3,urgency:"Monitor",
+        body:`Your ${d.mortgageRate}% is close to market. Watch your refix date.`,saving:null,to:null,alt:null,action:"none"});
+  }
+  if(d.power>150) out.push({icon:"⚡",title:"Power Bill Too High",color:T.amber,pri:1,urgency:"This Week",
+    body:`$${d.power}/mo — Meridian & Electric Kiwi are 15–20% cheaper for the same electricity.`,
+    saving:fmt(d.power*.18*12)+"/yr",to:"energy@meridian.co.nz",alt:"Meridian Energy",action:"switch"});
+  if(d.phone>25) out.push({icon:"📱",title:"Phone Plan Overpriced",color:T.teal,pri:1,urgency:"This Week",
+    body:`$${d.phone}/mo vs Skinny Mobile $19/mo — identical Spark network.`,
+    saving:fmt((d.phone-19)*12)+"/yr",to:"help@skinny.co.nz",alt:"Skinny Mobile",action:"switch"});
+  if(d.internet>65) out.push({icon:"📶",title:"Internet Too Expensive",color:T.teal,pri:2,urgency:"This Month",
+    body:`$${d.internet}/mo. 2degrees offers identical fibre from $55/mo.`,
+    saving:fmt((d.internet-65)*12)+"/yr",to:"support@2degrees.nz",alt:"2degrees",action:"switch"});
+  if(d.kiwiBalance&&d.age&&d.age<55&&(d.kiwiFund.includes("conserv")||d.kiwiFund.includes("default")||d.kiwiFund.includes("moderate"))){
+    const yrs=65-d.age,gr=d.kiwiBalance*Math.pow(1.07,yrs),co=d.kiwiBalance*Math.pow(1.035,yrs);
+    out.push({icon:"🥝",title:"Wrong KiwiSaver Fund!",color:T.red,pri:1,urgency:"Act Now",
+      body:`At ${d.age} in a ${d.kiwiFund} fund. Growth = ${fmt(gr)} vs ${fmt(co)} conservative at retirement. Switch now.`,
+      saving:fmt(gr-co)+" extra at 65",to:"hello@simplicity.kiwi",alt:"Simplicity Growth",action:"switch"});
+  }
+  const fp=parseFloat((d.kiwiFees||"").replace(/[%$]/g,""));
+  if(d.kiwiBalance&&fp>0.5) out.push({icon:"💸",title:"KiwiSaver Fees Too High",color:T.amber,pri:1,urgency:"This Month",
+    body:`${fp}% fees with ${d.kiwiProvider||"your provid
